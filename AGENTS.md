@@ -19,4 +19,8 @@ python3 scripts/publish_openvam.py "/path/to/完整批次.zip"
 python3 scripts/publish_openvam_release.py "/path/to/完整批次.zip"
 ```
 
+若制作环境已有能访问本私库的 GitHub 网页登录态，也可在 Releases 新建发布并上传完整 ZIP。标签使用 `openvam-<ZIP 的 64 位小写 SHA-256>`，目标选择 `main`。正文单独写一行 `原始文件名：<原文件名.zip>`。附件上传完成后发布。
+
+仓库工作流 `Publish OpenVam release ZIP` 会核对发布附件的 SHA-256，将不超过 100 MiB 的 ZIP 按原名同步至 `main/openvam/`。同步可在 Actions 中通过同一标签重试。超过该大小时直接使用 Release 的完整附件。
+
 使用云端代理或 GitHub 连接器交付时，从 GitHub 再读取 `main` 的目录条目，核对大小与本地 `git hash-object --no-filters` 的值。Release 附件按远端大小和 SHA-256 核对。核验通过后，向用户给出文件下载链接、字节数和 SHA-256。已有目的地授权沿用至本流程；遇到网络中断先检查远端是否已收到，再重试。两种传输都不可用时保留原包，并说明具体阻塞位置。
