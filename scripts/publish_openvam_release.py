@@ -1,4 +1,4 @@
-"""Publish a finished file as one verified asset in the private deliveries repository."""
+"""Publish a finished file as one verified asset in the deliveries repository."""
 
 import argparse
 import hashlib
@@ -13,6 +13,7 @@ import zlib
 
 
 REPO = "bao270026-sys/deliveries"
+REPO_ID = 1463720445
 
 
 def gh(*args, cwd=None, missing_ok=False):
@@ -87,8 +88,8 @@ def publish(path):
             sha256.update(chunk)
     digest = "sha256:" + sha256.hexdigest()
     tag = ("openvam-" if is_zip else "delivery-") + sha256.hexdigest()
-    if api("").get("private") is not True:
-        raise ValueError("The delivery repository must be private.")
+    if api("").get("id") != REPO_ID:
+        raise ValueError("GitHub returned a different repository ID for the delivery destination.")
 
     existing = release(tag)
     if existing is None:
