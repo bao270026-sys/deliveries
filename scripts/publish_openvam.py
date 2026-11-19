@@ -1,4 +1,4 @@
-"""Publish one finished ZIP to bao270026-sys/deliveries on main, preserving its name."""
+"""Deliver a finished file to bao270026-sys/deliveries using Git or a release asset."""
 
 import argparse
 import hashlib
@@ -16,10 +16,11 @@ import uuid
 import zipfile
 import zlib
 
+import publish_openvam_release
 
 REPOSITORY = "bao270026-sys/deliveries"
 BRANCH = "refs/heads/main"
-MAX_BYTES = 100 * 1024 * 1024
+GIT_BLOB_LIMIT = 100 * 1024 * 1024
 ATTEMPTS = 4
 
 
@@ -75,12 +76,13 @@ def is_destination(url, allow_relay=True):
 
 def publish(checkout, archive):
     archive = archive.resolve(strict=True)
-    if not archive.is_file() or archive.suffix.lower() != ".zip":
-        raise DeliveryError("Expected the finished ZIP file.")
+    if not archive.is_file():
+        raise DeliveryError("Expected a finished file.")
     if any(ord(char) < 32 or ord(char) == 127 for char in archive.name) or "\\" in archive.name:
         raise DeliveryError("The archive name contains a control or path separator character.")
-    if archive.stat().st_size > MAX_BYTES:
-        raise DeliveryError("The archive exceeds the 100 MiB Git file limit.")
+    if archive.stat().st_size > GIT_BLOB_LIMIT or archive.suffix.lower() != ".zip":
+        receipt = publish_openvam_release.publish(archive)
+        return {**receipt, "download_url": receipt["url"], "repository": REPOSITORY}
     path = "openvam/" + archive.name
     private_ref = "refs/openvam-publish/" + uuid.uuid4().hex
 
@@ -88,8 +90,8 @@ def publish(checkout, archive):
         snapshot = Path(temporary) / "payload.zip"
         shutil.copyfile(archive, snapshot)
         size = snapshot.stat().st_size
-        if size > MAX_BYTES:
-            raise DeliveryError("The archive exceeds the 100 MiB Git file limit.")
+        if size > GIT_BLOB_LIMIT:
+            raise DeliveryError("The file grew while being copied. Retry with the finished file.")
         try:
             with zipfile.ZipFile(snapshot) as contents:
                 if contents.testzip() is not None:
@@ -190,16 +192,15 @@ def publish(checkout, archive):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("zip", type=Path, help="finished ZIP to deliver")
+    parser.add_argument("file", type=Path, help="finished file to deliver (including large ZIPs)")
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="deliveries checkout (default: current directory)")
     args = parser.parse_args()
     try:
-        receipt = publish(args.repo, args.zip)
-    except (DeliveryError, OSError, UnicodeError) as exc:
+        receipt = publish(args.repo, args.file)
+    except (DeliveryError, OSError, RuntimeError, ValueError) as exc:
         parser.exit(1, f"Delivery failed: {exc}\n")
     print(json.dumps(receipt, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
     main()
-

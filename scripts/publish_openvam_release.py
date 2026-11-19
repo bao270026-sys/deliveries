@@ -1,4 +1,4 @@
-"""Publish one finished ZIP as a verified asset in the private deliveries repository."""
+"""Publish a finished file as one verified asset in the private deliveries repository."""
 
 import argparse
 import hashlib
@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+import zlib
 
 
 REPO = "bao270026-sys/deliveries"
@@ -48,7 +49,7 @@ def upload(path, tag):
         return
     # gh reserves '#' for asset labels. Stage an alias for that input only.
     with tempfile.TemporaryDirectory() as directory:
-        alias = Path(directory) / "openvam.zip"
+        alias = Path(directory) / ("delivery" + path.suffix.replace("#", "_"))
         try:
             os.link(path, alias)
         except OSError:
@@ -61,34 +62,50 @@ def verified_asset(assets, size, digest):
         raise ValueError("Expected exactly one release asset. Preserved the existing release.")
     asset = assets[0]
     if (asset.get("state"), asset.get("size"), asset.get("digest")) != ("uploaded", size, digest):
-        raise ValueError("The remote asset did not match the original ZIP's size and SHA-256.")
+        raise ValueError("The remote asset did not match the original file's size and SHA-256.")
     return asset
 
 
 def publish(path):
+    path = path.resolve(strict=True)
+    if not path.is_file() or any(ord(char) < 32 or ord(char) == 127 for char in path.name):
+        raise ValueError("Expected a regular file with a single-line filename.")
     size = path.stat().st_size
-    if path.suffix.lower() != ".zip" or not 0 < size < 2**31 or not zipfile.is_zipfile(path):
-        raise ValueError("Expected a complete ZIP file smaller than 2 GiB.")
+    if size >= 2**31:
+        raise ValueError("GitHub requires each release asset to be smaller than 2 GiB.")
+    is_zip = path.suffix.lower() == ".zip"
+    if is_zip:
+        try:
+            with zipfile.ZipFile(path) as archive:
+                if archive.testzip() is not None:
+                    raise ValueError("The ZIP failed CRC verification.")
+        except (zipfile.BadZipFile, EOFError, zlib.error) as exc:
+            raise ValueError("The ZIP failed its integrity check.") from exc
     with path.open("rb") as stream:
         sha256 = hashlib.sha256()
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             sha256.update(chunk)
     digest = "sha256:" + sha256.hexdigest()
-    tag = "openvam-" + sha256.hexdigest()
+    tag = ("openvam-" if is_zip else "delivery-") + sha256.hexdigest()
     if api("").get("private") is not True:
         raise ValueError("The delivery repository must be private.")
 
     existing = release(tag)
     if existing is None:
         gh("release", "create", tag, "--repo", REPO, "--target", "main", "--draft",
-           "--title", path.name, "--notes", digest)
+           "--title", path.name, "--notes", f"原始文件名：{path.name}\n{digest}")
         existing = release(tag)
     if existing is None:
         raise RuntimeError("The release could not be read back.")
     asset_path = f"/releases/{existing['databaseId']}/assets"
     assets = api(asset_path)
     if not assets and existing["isDraft"]:
-        upload(path, tag)
+        try:
+            upload(path, tag)
+        except RuntimeError:
+            # A lost upload response can follow a successful transfer.
+            if not api(asset_path):
+                raise
         assets = api(asset_path)
     asset = verified_asset(assets, size, digest)
     if existing["isDraft"]:
@@ -102,8 +119,8 @@ def publish(path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("zip_file", type=Path)
+    parser.add_argument("file", type=Path)
     try:
-        print(json.dumps(publish(parser.parse_args().zip_file.resolve()), ensure_ascii=False))
+        print(json.dumps(publish(parser.parse_args().file), ensure_ascii=False))
     except (KeyError, OSError, RuntimeError, ValueError) as exc:
         parser.exit(1, f"Release delivery failed: {exc}\n")
