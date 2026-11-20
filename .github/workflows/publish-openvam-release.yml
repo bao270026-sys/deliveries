@@ -87,5 +87,7 @@ jobs:
                   actual = hashlib.file_digest(data, "sha256").hexdigest()
               if archive.stat().st_size != asset["size"] or actual != expected:
                   sys.exit("Downloaded ZIP size or SHA-256 mismatch.")
-              subprocess.run([sys.executable, "scripts/publish_openvam.py", str(archive)], check=True)
-
+              # This file is already a release asset. The mirror succeeds only after a Git write.
+              sys.path.insert(0, str(Path("scripts").resolve()))
+              from publish_openvam import publish
+              print(json.dumps(publish(Path.cwd(), archive), ensure_ascii=False))

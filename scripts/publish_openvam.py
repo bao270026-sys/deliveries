@@ -2,7 +2,6 @@
 
 import argparse
 import hashlib
-import json
 import os
 from pathlib import Path
 import re
@@ -17,6 +16,7 @@ import zipfile
 import zlib
 
 import publish_openvam_release
+from verify_public_download import report_delivery
 
 REPOSITORY = "bao270026-sys/deliveries"
 BRANCH = "refs/heads/main"
@@ -196,11 +196,25 @@ def main():
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="deliveries checkout (default: current directory)")
     args = parser.parse_args()
     try:
-        receipt = publish(args.repo, args.file)
+        try:
+            receipt = publish(args.repo, args.file)
+        except GitError:
+            # A checkout and GitHub CLI can use different, already connected identities.
+            if not shutil.which("gh"):
+                raise
+            auth = subprocess.run(
+                ["gh", "auth", "status", "--hostname", "github.com", "--active"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env={**os.environ, "GH_PROMPT_DISABLED": "1"},
+            )
+            if auth.returncode:
+                raise
+            release = publish_openvam_release.publish(args.file)
+            receipt = {**release, "download_url": release["url"], "repository": REPOSITORY}
     except (DeliveryError, OSError, RuntimeError, ValueError) as exc:
         parser.exit(1, f"Delivery failed: {exc}\n")
-    print(json.dumps(receipt, ensure_ascii=False, indent=2))
+    return report_delivery(receipt, args.file)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

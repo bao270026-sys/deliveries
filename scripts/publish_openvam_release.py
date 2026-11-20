@@ -11,6 +11,8 @@ import tempfile
 import zipfile
 import zlib
 
+from verify_public_download import report_delivery
+
 
 REPO = "bao270026-sys/deliveries"
 REPO_ID = 1463720445
@@ -122,6 +124,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("file", type=Path)
     try:
-        print(json.dumps(publish(parser.parse_args().file), ensure_ascii=False))
+        path = parser.parse_args().file
+        receipt = publish(path)
     except (KeyError, OSError, RuntimeError, ValueError) as exc:
         parser.exit(1, f"Release delivery failed: {exc}\n")
+    parser.exit(report_delivery(receipt, path))
